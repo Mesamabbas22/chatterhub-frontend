@@ -4,13 +4,6 @@ import { useChatStore } from '../../store/chatStore';
 const chatStore = useChatStore();
 const messageText = ref('');
 
-defineProps({
-    msg: {
-        type: String,
-        required: true,
-    },
-})
-
 const submitMessage = async () => {
     const content = messageText.value.trim();
 

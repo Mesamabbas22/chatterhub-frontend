@@ -1,12 +1,3 @@
-<script setup>
-defineProps({
-    msg: {
-        type: String,
-        required: true,
-    },
-})
-</script>
-
 <template>
     <div class="search-box">
         <div class="input-group">

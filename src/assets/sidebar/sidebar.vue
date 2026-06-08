@@ -187,12 +187,6 @@ const rejectRequest = async (request) => {
     }
 }
 
-defineProps({
-    msg: {
-        type: String,
-        required: true,
-    },
-})
 </script>
 
 <template>

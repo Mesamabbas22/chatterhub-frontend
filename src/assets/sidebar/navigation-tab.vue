@@ -1,12 +1,3 @@
-<script setup>
-defineProps({
-    msg: {
-        type: String,
-        required: true,
-    },
-})
-</script>
-
 <template>
     <ul class="nav nav-tabs" role="tablist">
         <li class="nav-item" role="presentation">

@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api'
+export const API_BASE_URL = 'http://127.0.0.1:8000/api'
 const TOKEN_KEY = 'chatterhub_token'
 
 export const api = axios.create({
@@ -31,3 +31,4 @@ if (existingToken) {
 }
 
 export const TOKEN_STORAGE_KEY = TOKEN_KEY
+export default api

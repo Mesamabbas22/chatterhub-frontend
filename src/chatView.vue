@@ -16,7 +16,7 @@ onBeforeUnmount(() => {
   <div class="main-container">
     <sidebar />
     <mainChatArea />
-    <rightPanal msg="Hello, this is a test message!" />
+    <rightPanal />
   </div>
 </template>
 

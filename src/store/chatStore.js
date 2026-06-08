@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, getStoredToken } from '../services/api'
+import Echo, { refreshEchoAuthHeaders } from './echo'
 
 const fallbackAvatar = (id = 1) => `https://i.pravatar.cc/150?img=${(Number(id) % 70) + 1}`
 const chatWebSocketUrl = import.meta.env.VITE_CHAT_WS_URL || ''
@@ -8,6 +9,8 @@ let realtimeSocket = null
 let realtimePollTimer = null
 let realtimeReconnectTimer = null
 let realtimeStoppedManually = false
+let realtimeEchoChannel = null
+let realtimeEchoChannelName = ''
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
@@ -89,6 +92,9 @@ const safeJsonParse = (value) => {
 const getRealtimeMessagePayload = (payload) => {
     const parsedPayload = safeJsonParse(payload)
     const parsedData = safeJsonParse(parsedPayload?.data)
+
+    if (hasMessageContent(parsedPayload)) return parsedPayload
+    if (hasMessageContent(parsedData)) return parsedData
 
     return parsedPayload?.message?.data
         || parsedPayload?.message
@@ -373,6 +379,11 @@ export const useChatStore = defineStore('chat', {
             this.stopRealtimeMessages()
             realtimeStoppedManually = false
 
+            if (Echo) {
+                this.connectEchoMessages(conversationsId)
+                return
+            }
+
             const websocketUrl = buildWebSocketUrl(conversationsId)
 
             if (websocketUrl && typeof WebSocket !== 'undefined') {
@@ -381,6 +392,44 @@ export const useChatStore = defineStore('chat', {
             }
 
             this.startMessagePolling(conversationsId)
+        },
+
+        connectEchoMessages(conversationsId) {
+            refreshEchoAuthHeaders()
+            realtimeEchoChannelName = `conversation.${conversationsId}`
+            this.realtimeStatus = 'connecting'
+
+            try {
+                realtimeEchoChannel = Echo.private(realtimeEchoChannelName)
+            } catch (error) {
+                console.warn('Unable to start Echo private channel.', error)
+                this.startMessagePolling(conversationsId)
+                return
+            }
+
+            const handleMessage = (payload) => {
+                const message = getRealtimeMessagePayload(payload)
+                const messageConversationId = message?.conversation_id || message?.conversationsId || conversationsId
+
+                if (Number(messageConversationId) !== Number(conversationsId)) return
+
+                this.upsertMessage(message, conversationsId)
+            }
+
+            realtimeEchoChannel
+                .listen('MessageSent', handleMessage)
+                .listen('.MessageSent', handleMessage)
+                .listen('MessageCreated', handleMessage)
+                .listen('.MessageCreated', handleMessage)
+
+            realtimeEchoChannel.subscribed?.(() => {
+                this.realtimeStatus = 'connected'
+            })
+
+            realtimeEchoChannel.error?.((error) => {
+                console.warn('Echo private channel auth failed.', error)
+                this.startMessagePolling(conversationsId)
+            })
         },
 
         connectWebSocketMessages(conversationsId, websocketUrl) {
@@ -435,6 +484,13 @@ export const useChatStore = defineStore('chat', {
 
         stopRealtimeMessages() {
             realtimeStoppedManually = true
+
+            if (realtimeEchoChannel && realtimeEchoChannelName) {
+                Echo.leave(`private-${realtimeEchoChannelName}`)
+                Echo.leave(realtimeEchoChannelName)
+                realtimeEchoChannel = null
+                realtimeEchoChannelName = ''
+            }
 
             if (realtimePollTimer) {
                 window.clearInterval(realtimePollTimer)
