@@ -113,7 +113,6 @@ const hasMessageContent = (message) => Boolean(
 
 const buildWebSocketUrl = (conversationsId) => {
     if (!chatWebSocketUrl || !conversationsId) return ''
-
     try {
         const url = new URL(chatWebSocketUrl)
         const token = getStoredToken()
@@ -385,7 +384,6 @@ export const useChatStore = defineStore('chat', {
             }
 
             const websocketUrl = buildWebSocketUrl(conversationsId)
-
             if (websocketUrl && typeof WebSocket !== 'undefined') {
                 this.connectWebSocketMessages(conversationsId, websocketUrl)
                 return
@@ -408,15 +406,19 @@ export const useChatStore = defineStore('chat', {
             }
 
             const handleMessage = (payload) => {
+                    console.log('Realtime payload:', payload)
                 const message = getRealtimeMessagePayload(payload)
                 const messageConversationId = message?.conversation_id || message?.conversationsId || conversationsId
+                console.log('Realtime payload:', payload)
 
                 if (Number(messageConversationId) !== Number(conversationsId)) return
 
                 this.upsertMessage(message, conversationsId)
             }
 
-            realtimeEchoChannel
+                realtimeEchoChannel
+                .listen('.message.sent', handleMessage)
+                .listen('message.sent', handleMessage)
                 .listen('MessageSent', handleMessage)
                 .listen('.MessageSent', handleMessage)
                 .listen('MessageCreated', handleMessage)
