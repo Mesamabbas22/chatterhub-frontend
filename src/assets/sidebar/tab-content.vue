@@ -42,6 +42,7 @@ onMounted(() => {
                         <span class="chat-time">{{ chat.time }}</span>
                     </div>
                     <div class="chat-preview">{{ chat.lastMessage }}</div>
+                    <div class="presence-text" :class="{ online: chat.isOnline }">{{ chat.statusText }}</div>
                 </div>
                 <span class="unread-badge" :style="{ display: chat.unread > 0 ? 'block' : 'none' }">{{ chat.unread }}</span>
             </div>

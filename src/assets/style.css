@@ -707,6 +707,21 @@
             text-overflow: ellipsis;
         }
 
+        .presence-text {
+            display: block;
+            margin-top: 2px;
+            font-size: 12px;
+            line-height: 1.25;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .presence-text.online {
+            color: #10b981;
+        }
+
         .chat-time {
             font-size: 11px;
             color: var(--text-secondary);

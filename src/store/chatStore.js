@@ -11,6 +11,8 @@ let realtimeReconnectTimer = null
 let realtimeStoppedManually = false
 let realtimeEchoChannel = null
 let realtimeEchoChannelName = ''
+let statusEchoChannel = null
+let statusChannelStarted = false
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
@@ -33,6 +35,10 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+})
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
+    numeric: 'auto',
 })
 
 const parseTimestamp = (value) => {
@@ -65,6 +71,33 @@ const formatReadableTime = (value, options = {}) => {
     if (date.getFullYear() === now.getFullYear()) return dateFormatter.format(date)
 
     return dateWithYearFormatter.format(date)
+}
+
+const formatRelativeTime = (value) => {
+    const date = parseTimestamp(value)
+
+    if (!date) return ''
+
+    const diffInSeconds = Math.round((date.getTime() - Date.now()) / 1000)
+    const ranges = [
+        ['year', 60 * 60 * 24 * 365],
+        ['month', 60 * 60 * 24 * 30],
+        ['week', 60 * 60 * 24 * 7],
+        ['day', 60 * 60 * 24],
+        ['hour', 60 * 60],
+        ['minute', 60],
+        ['second', 1],
+    ]
+    const [unit, secondsInUnit] = ranges.find(([, seconds]) => Math.abs(diffInSeconds) >= seconds) || ['second', 1]
+
+    return relativeTimeFormatter.format(Math.round(diffInSeconds / secondsInUnit), unit)
+}
+
+const getStatusText = (isOnline, lastSeenAt) => {
+    if (isOnline) return 'Online'
+    if (!lastSeenAt) return 'Offline'
+
+    return `Last seen ${formatRelativeTime(lastSeenAt)}`
 }
 
 const getResponseData = (payload) => {
@@ -151,7 +184,7 @@ const getConversationUser = (conversation) => {
     if (!Array.isArray(conversation.users)) return {}
 
     const currentUserId = conversation.pivot?.user_id || getCurrentUserId()
-    return conversation.users.find((user) => user.id !== currentUserId) || conversation.users[0] || {}
+    return conversation.users.find((user) => Number(user.id) !== Number(currentUserId)) || conversation.users[0] || {}
 }
 
 const getLastMessage = (conversation) => {
@@ -181,18 +214,33 @@ const getConversationName = (conversation, user, index) => {
     return `Conversation ${index + 1}`
 }
 
+const getConversationUserId = (conversation, user) => (
+    user.id
+    || conversation.user_id
+    || conversation.participant_id
+    || conversation.receiver_id
+    || conversation.contact_id
+    || null
+)
+
 const normalizeConversation = (conversation, index = 0) => {
     const user = getConversationUser(conversation)
     const lastMessage = getLastMessage(conversation)
     const lastMessageText = typeof lastMessage === 'string'
         ? lastMessage
         : lastMessage.content || lastMessage.message || lastMessage.body
+    const isOnline = Boolean(conversation.is_online ?? user.is_online ?? false)
+    const lastSeenAt = conversation.last_seen_at || user.last_seen_at || null
 
     return {
         id: conversation.id || conversation._id || conversation.conversationId || Date.now() + index,
+        userId: getConversationUserId(conversation, user),
         type: conversation.type || 'private',
         name: getConversationName(conversation, user, index),
-        status: conversation.status || user.status || 'online',
+        isOnline,
+        lastSeenAt,
+        status: isOnline ? 'online' : 'offline',
+        statusText: getStatusText(isOnline, lastSeenAt),
         lastMessage: lastMessageText || 'No messages yet',
         time: formatReadableTime(conversation.time || conversation.last_message_at || conversation.updated_at || conversation.updatedAt || conversation.created_at || 'Just now'),
         unread: Number(conversation.unread || conversation.unread_count || conversation.unreadCount || 0),
@@ -265,11 +313,24 @@ export const useChatStore = defineStore('chat', {
 
             return state.conversations.find((conv) => conv.id === state.currentChat.conversationsId) || null
         },
+
+        activeUserStatusText(state) {
+            if (!state.currentChat) return ''
+
+            const conversation = state.conversations.find((conv) => conv.id === state.currentChat.conversationsId)
+            return conversation?.statusText || ''
+        },
     },
 
     actions: {
         openChat(name, status, conversationsId) {
-            this.currentChat = { name, status, conversationsId }
+            const conversation = this.conversations.find((conv) => conv.id === conversationsId)
+            this.currentChat = {
+                name: conversation?.name || name,
+                status: conversation?.status || status,
+                conversationsId,
+                userId: conversation?.userId || null,
+            }
             this.markasSeen(conversationsId)
             this.loadMessages(conversationsId).catch(() => {})
             this.startRealtimeMessages(conversationsId)
@@ -294,6 +355,8 @@ export const useChatStore = defineStore('chat', {
 
                 this.conversations = conversations
                 this.messages = rawConversations.flatMap(normalizeMessages)
+                this.startUserStatusUpdates()
+                this.refreshConversationStatuses().catch(() => {})
                 return conversations
             } catch (error) {
                 this.conversationsError = getErrorMessage(error, 'Unable to load conversations.')
@@ -372,6 +435,88 @@ export const useChatStore = defineStore('chat', {
 
             const conversation = this.conversations.find((conv) => conv.id === message.conversationsId)
             if (conversation) conversation.unread += 1
+        },
+
+        applyUserStatus(statusEvent) {
+            const userId = statusEvent?.user_id || statusEvent?.userId || statusEvent?.id
+            if (!userId) return
+
+            const isOnline = Boolean(statusEvent.is_online ?? statusEvent.isOnline)
+            const lastSeenAt = statusEvent.last_seen_at ?? statusEvent.lastSeenAt ?? null
+            const status = isOnline ? 'online' : 'offline'
+            const statusText = getStatusText(isOnline, lastSeenAt)
+
+            this.conversations.forEach((conversation) => {
+                if (Number(conversation.userId) !== Number(userId)) return
+
+                conversation.isOnline = isOnline
+                conversation.lastSeenAt = lastSeenAt
+                conversation.status = status
+                conversation.statusText = statusText
+            })
+
+            if (Number(this.currentChat?.userId) === Number(userId)) {
+                this.currentChat.status = status
+            }
+        },
+
+        async loadUserStatus(userId) {
+            if (!userId) return null
+
+            try {
+                const { data } = await api.get(`/users/${userId}/status`)
+                const status = data?.data || data
+                this.applyUserStatus({
+                    user_id: userId,
+                    ...status,
+                })
+                return status
+            } catch (error) {
+                console.warn('Unable to load user status.', error)
+                return null
+            }
+        },
+
+        async refreshConversationStatuses() {
+            const userIds = [...new Set(this.conversations
+                .map((conversation) => conversation.userId)
+                .filter(Boolean))]
+
+            await Promise.all(userIds.map((userId) => this.loadUserStatus(userId)))
+        },
+
+        startUserStatusUpdates() {
+            if (statusChannelStarted || !Echo) return
+
+            refreshEchoAuthHeaders()
+            statusChannelStarted = true
+
+            try {
+                statusEchoChannel = Echo.private('users.status')
+            } catch (error) {
+                statusChannelStarted = false
+                console.warn('Unable to start user status channel.', error)
+                return
+            }
+
+            statusEchoChannel
+                .listen('.user.status.updated', (event) => this.applyUserStatus(event))
+                .listen('user.status.updated', (event) => this.applyUserStatus(event))
+                .listen('UserStatusUpdated', (event) => this.applyUserStatus(event))
+                .listen('.UserStatusUpdated', (event) => this.applyUserStatus(event))
+
+            statusEchoChannel.error?.((error) => {
+                console.warn('User status channel auth failed.', error)
+            })
+        },
+
+        stopUserStatusUpdates() {
+            if (!statusChannelStarted) return
+
+            Echo.leave('private-users.status')
+            Echo.leave('users.status')
+            statusEchoChannel = null
+            statusChannelStarted = false
         },
 
         startRealtimeMessages(conversationsId) {

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { api, clearStoredToken, getStoredToken, setStoredToken } from '../services/api'
+import { API_BASE_URL, api, clearStoredToken, getStoredToken, setStoredToken } from '../services/api'
+import { refreshEchoAuthHeaders } from './echo'
 
 const extractToken = (payload) => {
   if (!payload) return null
@@ -46,6 +47,46 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
+    async markOnline() {
+      if (!this.token && !getStoredToken()) return null
+
+      try {
+        const { data } = await api.post('/status/online')
+        return data
+      } catch (error) {
+        console.warn('Unable to mark user online.', error)
+        return null
+      }
+    },
+
+    async markOffline(options = {}) {
+      const token = this.token || getStoredToken()
+      if (!token) return null
+
+      if (options.keepalive && typeof fetch === 'function') {
+        fetch(`${API_BASE_URL}/status/offline`, {
+          method: 'POST',
+          keepalive: true,
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: '{}',
+        }).catch(() => {})
+
+        return null
+      }
+
+      try {
+        const { data } = await api.post('/status/offline')
+        return data
+      } catch (error) {
+        console.warn('Unable to mark user offline.', error)
+        return null
+      }
+    },
+
     async register(form) {
       this.loading = true
       this.error = ''
@@ -57,6 +98,8 @@ export const useAuthStore = defineStore('auth', {
         if (token) {
           this.token = token
           setStoredToken(token)
+          refreshEchoAuthHeaders()
+          this.markOnline().catch(() => {})
         }
 
         this.user = extractUser(data)
@@ -84,6 +127,8 @@ export const useAuthStore = defineStore('auth', {
         this.token = token
         this.user = extractUser(data)
         setStoredToken(token)
+        refreshEchoAuthHeaders()
+        this.markOnline().catch(() => {})
 
         return data
       } catch (error) {
@@ -96,11 +141,13 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    logout() {
+    async logout() {
+      await this.markOffline()
       this.token = null
       this.user = null
       this.error = ''
       clearStoredToken()
+      refreshEchoAuthHeaders()
     },
   },
 })

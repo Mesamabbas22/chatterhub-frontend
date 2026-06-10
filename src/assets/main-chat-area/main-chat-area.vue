@@ -1,8 +1,9 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useChatStore } from '../../store/chatStore';
 const chatStore = useChatStore();
 const messageText = ref('');
+const activeConversation = computed(() => chatStore.activeUser);
 
 const submitMessage = async () => {
     const content = messageText.value.trim();
@@ -29,12 +30,18 @@ const submitMessage = async () => {
             <div class="chat-header">
                 <div class="chat-header-info">
                     <div class="avatar" style="margin-right: 15px;">
-                        <img id="chatAvatar" :src="chatStore.conversations.filter(c => c.id === chatStore.currentChat?.conversationsId)[0]?.profilePicture" alt="Avatar">
-                        <div id="chatStatus" class="status-indicator" :class="chatStore.currentChat?.status"></div>
+                        <img id="chatAvatar" :src="activeConversation?.profilePicture" alt="Avatar">
+                        <div id="chatStatus" class="status-indicator" :class="activeConversation?.status"></div>
                     </div>
                     <div>
-                        <h6 id="chatName" class="mb-0">{{ chatStore.currentChat?.name }}</h6>
-                        <small id="chatStatusText" class="text-success">{{ chatStore.currentChat?.statusText }}</small>
+                        <h6 id="chatName" class="mb-0">{{ activeConversation?.name || chatStore.currentChat?.name }}</h6>
+                        <small
+                            id="chatStatusText"
+                            class="presence-text"
+                            :class="{ online: activeConversation?.isOnline }"
+                        >
+                            {{ activeConversation?.statusText || 'Offline' }}
+                        </small>
                     </div>
                 </div>
                 <div class="chat-header-actions">
@@ -59,7 +66,7 @@ const submitMessage = async () => {
                 </div>
 
                 <div v-for="message in chatStore.getCurrentChatMessages" :key="message.id" class="message" :class="{sent: message.type === 'sent'}">
-                    <img class="message-avatar" :src="chatStore.conversations.filter(c => c.id === chatStore.currentChat?.conversationsId)[0]?.profilePicture" alt="Avatar">
+                    <img class="message-avatar" :src="activeConversation?.profilePicture" alt="Avatar">
                     <div class="message-content">
                         <div class="message-bubble">
                             {{ message.content }}
